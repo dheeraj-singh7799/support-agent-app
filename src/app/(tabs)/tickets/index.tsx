@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   Pressable,
-  useColorScheme,
-  Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
   fetchTickets,
@@ -23,11 +22,13 @@ import { Ticket, TicketFilters } from '@/types/ticket';
 
 export default function TicketListScreen() {
   const dispatch = useAppDispatch();
-  const isDark = useColorScheme() === 'dark';
 
   const { items, filters, isLoading, isRefreshing, isLoadingMore, error, hasMore } =
     useAppSelector((state) => state.tickets);
   const currentAgent = useAppSelector((state) => state.auth.agent);
+
+  const [showSearch, setShowSearch] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   // Load initial page or when filters change
   useEffect(() => {
@@ -69,28 +70,51 @@ export default function TicketListScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' }]}>
-      {/* Filter and Search Bar */}
+    <View style={styles.container}>
+      {/* Signature Blue Top App Bar matching Screen 2 */}
+      <View style={styles.topAppBar}>
+        <Text style={styles.appBarTitle}>Tickets</Text>
+        <View style={styles.appBarActions}>
+          <Pressable
+            onPress={() => setShowSearch(!showSearch)}
+            style={styles.iconBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Search tickets"
+          >
+            <Ionicons name="search" size={22} color="#FFFFFF" />
+          </Pressable>
+          <Pressable
+            onPress={() => setShowFilters(!showFilters)}
+            style={styles.iconBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Filter tickets"
+          >
+            <Ionicons name="funnel-outline" size={20} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Filter Bar with Horizontal Pill Tabs */}
       <FilterBar
         filters={filters}
         onChangeFilters={handleFilterChange}
         onReset={handleResetFilters}
         hasActiveFilters={hasActiveFilters}
+        showSearch={showSearch}
+        showFilters={showFilters}
+        onToggleSearch={() => setShowSearch(!showSearch)}
+        onToggleFilters={() => setShowFilters(!showFilters)}
       />
 
       {/* Error state with retry */}
       {error && items.length === 0 && !isLoading && (
         <View style={styles.stateCenter}>
           <Text style={styles.errorIcon}>⚠️</Text>
-          <Text style={[styles.stateTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-            Unable to Load Queue
-          </Text>
-          <Text style={[styles.stateSubtitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            {error}
-          </Text>
+          <Text style={styles.stateTitle}>Unable to Load Queue</Text>
+          <Text style={styles.stateSubtitle}>{error}</Text>
           <Pressable
             onPress={handleRefresh}
-            style={[styles.retryBtn, { backgroundColor: '#2563EB' }]}
+            style={styles.retryBtn}
             accessibilityRole="button"
             accessibilityLabel="Retry loading tickets"
           >
@@ -99,66 +123,60 @@ export default function TicketListScreen() {
         </View>
       )}
 
-      {/* Initial Loading */}
-      {isLoading && items.length === 0 && (
+      {/* Empty State */}
+      {!isLoading && !error && items.length === 0 && (
         <View style={styles.stateCenter}>
-          <ActivityIndicator size="large" color="#3B82F6" />
-          <Text style={[styles.stateSubtitle, { color: isDark ? '#94A3B8' : '#64748B', marginTop: 12 }]}>
-            Fetching live tickets...
+          <Text style={styles.emptyIcon}>📭</Text>
+          <Text style={styles.stateTitle}>No Tickets Found</Text>
+          <Text style={styles.stateSubtitle}>
+            {hasActiveFilters
+              ? 'No tickets match your active filters.'
+              : 'There are no active tickets in the queue.'}
           </Text>
+          {hasActiveFilters && (
+            <Pressable onPress={handleResetFilters} style={styles.clearBtn}>
+              <Text style={styles.clearBtnText}>Clear Filters</Text>
+            </Pressable>
+          )}
         </View>
       )}
 
-      {/* Ticket FlatList */}
+      {/* Initial Loading Skeleton */}
+      {isLoading && items.length === 0 && (
+        <View style={styles.stateCenter}>
+          <ActivityIndicator size="large" color="#2563EB" />
+          <Text style={styles.loadingText}>Loading tickets...</Text>
+        </View>
+      )}
+
+      {/* Virtualized Ticket List */}
       <FlatList
         data={items}
-        keyExtractor={(item) => item.external_id}
         renderItem={renderItem}
+        keyExtractor={(item) => item.external_id}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
-            tintColor="#3B82F6"
-            colors={['#3B82F6']}
+            colors={['#2563EB']}
+            tintColor="#2563EB"
           />
         }
         onEndReached={handleEndReached}
-        onEndReachedThreshold={0.5}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View style={styles.loadingMore}>
+              <ActivityIndicator size="small" color="#2563EB" />
+              <Text style={styles.loadingMoreText}>Loading more tickets...</Text>
+            </View>
+          ) : null
+        }
         initialNumToRender={10}
         maxToRenderPerBatch={10}
         windowSize={7}
-        removeClippedSubviews={Platform.OS === 'android'}
-        ListEmptyComponent={
-          !isLoading && !error ? (
-            <View style={styles.stateCenter}>
-              <Text style={styles.emptyIcon}>📭</Text>
-              <Text style={[styles.stateTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-                No Tickets Found
-              </Text>
-              <Text style={[styles.stateSubtitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-                {hasActiveFilters
-                  ? 'No tickets match the selected filters. Try clearing some filters.'
-                  : 'The queue is currently empty.'}
-              </Text>
-              {hasActiveFilters && (
-                <Pressable onPress={handleResetFilters} style={styles.clearFiltersBtn}>
-                  <Text style={styles.clearFiltersText}>Clear Filters</Text>
-                </Pressable>
-              )}
-            </View>
-          ) : null
-        }
-        ListFooterComponent={
-          isLoadingMore ? (
-            <View style={styles.footerLoader}>
-              <ActivityIndicator size="small" color="#3B82F6" />
-              <Text style={[styles.footerText, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-                Loading more tickets...
-              </Text>
-            </View>
-          ) : null
-        }
+        removeClippedSubviews={true}
       />
     </View>
   );
@@ -167,20 +185,41 @@ export default function TicketListScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  topAppBar: {
+    height: 56,
+    backgroundColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  appBarTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  appBarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  iconBtn: {
+    padding: 4,
   },
   listContent: {
-    paddingVertical: 10,
-    flexGrow: 1,
+    paddingVertical: 8,
   },
   stateCenter: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
-    marginTop: 60,
   },
   errorIcon: {
-    fontSize: 48,
+    fontSize: 40,
     marginBottom: 12,
   },
   emptyIcon: {
@@ -189,18 +228,20 @@ const styles = StyleSheet.create({
   },
   stateTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
+    color: '#0F172A',
     marginBottom: 6,
     textAlign: 'center',
   },
   stateSubtitle: {
     fontSize: 14,
+    color: '#64748B',
     textAlign: 'center',
+    marginBottom: 18,
     lineHeight: 20,
-    maxWidth: 280,
   },
   retryBtn: {
-    marginTop: 16,
+    backgroundColor: '#2563EB',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 10,
@@ -210,25 +251,33 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
-  clearFiltersBtn: {
-    marginTop: 14,
+  clearBtn: {
     paddingHorizontal: 16,
     paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
   },
-  clearFiltersText: {
-    color: '#3B82F6',
+  clearBtnText: {
+    color: '#2563EB',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
-  footerLoader: {
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  loadingMore: {
+    paddingVertical: 16,
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
     gap: 8,
   },
-  footerText: {
+  loadingMoreText: {
     fontSize: 12,
-    fontWeight: '600',
+    color: '#64748B',
+    fontWeight: '500',
   },
 });

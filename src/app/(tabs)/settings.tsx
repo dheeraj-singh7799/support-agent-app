@@ -7,9 +7,9 @@ import {
   Switch,
   ScrollView,
   Alert,
-  useColorScheme,
 } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { logoutAgent } from '@/store/slices/authSlice';
 import { fakeApi } from '@/services/api/fakeApiServer';
@@ -18,7 +18,6 @@ import { fetchTickets } from '@/store/slices/ticketsSlice';
 
 export default function SettingsScreen() {
   const dispatch = useAppDispatch();
-  const isDark = useColorScheme() === 'dark';
 
   const agent = useAppSelector((state) => state.auth.agent);
   const pendingCount = useAppSelector((state) => state.offline.pendingCount);
@@ -87,202 +86,227 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' }]}
-      contentContainerStyle={styles.content}
-    >
-      {/* Agent Card */}
-      <View style={[styles.card, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
-        <View style={styles.agentRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{agent?.name?.[0] || 'A'}</Text>
-          </View>
-          <View style={styles.agentMeta}>
-            <Text style={[styles.agentName, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-              {agent?.name || 'Unknown Agent'}
-            </Text>
-            <Text style={[styles.agentId, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              ID: {agent?.id}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.statRow}>
-          <Text style={[styles.statLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            Pending Outbox Changes:
-          </Text>
-          <Text style={[styles.statVal, { color: pendingCount > 0 ? '#F59E0B' : '#10B981' }]}>
-            {pendingCount}
-          </Text>
-        </View>
+    <View style={styles.container}>
+      {/* Signature Blue Top App Bar matching Screen 10 */}
+      <View style={styles.appBar}>
+        <Text style={styles.appBarTitle}>Settings</Text>
       </View>
 
-      {/* Simulator Controls */}
-      <Text style={[styles.sectionTitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-        EVALUATION / SIMULATION CONTROLS
-      </Text>
-      <View style={[styles.card, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-              Simulate 10% Network Errors
-            </Text>
-            <Text style={[styles.settingDesc, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              About 1 request in 10 fails with HTTP 500
-            </Text>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Simulation Controls Section */}
+        <Text style={styles.sectionHeading}>Simulation Controls</Text>
+        <View style={styles.card}>
+          {/* 500 Errors Toggle */}
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>Simulate 500 Errors</Text>
+            <Switch
+              value={simulateErrors}
+              onValueChange={handleToggleErrors}
+              trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+              thumbColor={simulateErrors ? '#2563EB' : '#FFFFFF'}
+            />
           </View>
-          <Switch value={simulateErrors} onValueChange={handleToggleErrors} />
+
+          {/* 409 Conflicts Toggle */}
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>Simulate 409 Conflicts</Text>
+            <Switch
+              value={simulateConflicts}
+              onValueChange={handleToggleConflicts}
+              trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+              thumbColor={simulateConflicts ? '#2563EB' : '#FFFFFF'}
+            />
+          </View>
+
+          {/* Background Events Toggle */}
+          <View style={[styles.switchRow, { borderBottomWidth: 0, marginBottom: 8 }]}>
+            <Text style={styles.switchLabel}>Background Events</Text>
+            <Switch
+              value={backgroundActivity}
+              onValueChange={handleToggleBackground}
+              trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+              thumbColor={backgroundActivity ? '#2563EB' : '#FFFFFF'}
+            />
+          </View>
+
+          {/* Reset Database Button */}
+          <Pressable
+            onPress={handleResetDatabase}
+            style={({ pressed }) => [
+              styles.resetBtn,
+              { opacity: pressed ? 0.85 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Reset Database"
+          >
+            <Text style={styles.resetBtnText}>Reset Database</Text>
+          </Pressable>
         </View>
 
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-              Simulate 25% Claim Conflicts (409)
-            </Text>
-            <Text style={[styles.settingDesc, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              About 1 claim in 4 fails with conflict
-            </Text>
+        {/* Agent Profile Section */}
+        <Text style={styles.sectionHeading}>Agent</Text>
+        <View style={styles.card}>
+          <View style={styles.agentRow}>
+            <View style={styles.avatarCircle}>
+              <Ionicons name="person" size={20} color="#2563EB" />
+            </View>
+            <View style={styles.agentMeta}>
+              <Text style={styles.agentName}>{agent?.name || 'Priya'}</Text>
+              <Text style={styles.agentEmail}>
+                {agent ? `${agent.id}@company.com` : 'agent-1@company.com'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-down" size={18} color="#94A3B8" />
           </View>
-          <Switch value={simulateConflicts} onValueChange={handleToggleConflicts} />
+
+          {/* Sign Out Button */}
+          <Pressable
+            onPress={handleLogout}
+            style={({ pressed }) => [
+              styles.signOutBtn,
+              { opacity: pressed ? 0.85 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Sign Out"
+          >
+            <Text style={styles.signOutBtnText}>Sign Out</Text>
+          </Pressable>
         </View>
 
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-              Background Ticket Activity
-            </Text>
-            <Text style={[styles.settingDesc, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              Simulate incoming tickets & other agents every 5-10s
-            </Text>
-          </View>
-          <Switch value={backgroundActivity} onValueChange={handleToggleBackground} />
+        {/* App Info Footer */}
+        <View style={styles.infoFooter}>
+          <Text style={styles.infoFooterText}>Support Agent Mobile • Expo SDK 57</Text>
+          <Text style={styles.infoFooterSub}>
+            Offline queue items pending: {pendingCount}
+          </Text>
         </View>
-
-        <Pressable onPress={handleResetDatabase} style={styles.resetBtn}>
-          <Text style={styles.resetBtnText}>↺ Re-seed 5,000 Mock Tickets</Text>
-        </Pressable>
-      </View>
-
-      {/* Sign Out Button */}
-      <Pressable onPress={handleLogout} style={styles.logoutBtn} accessibilityRole="button">
-        <Text style={styles.logoutBtnText}>Sign Out & Clear Local Data</Text>
-      </Pressable>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  appBar: {
+    height: 56,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  appBarTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
   content: {
     padding: 16,
     paddingBottom: 40,
   },
+  sectionHeading: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+    marginBottom: 8,
+    marginTop: 8,
+  },
   card: {
-    padding: 16,
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 16,
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.04,
     shadowRadius: 3,
-    elevation: 2,
+    elevation: 1,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  switchLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  resetBtn: {
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FEF2F2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  resetBtnText: {
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '700',
   },
   agentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    marginBottom: 16,
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#3B82F6',
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#EFF6FF',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '800',
+    marginRight: 12,
   },
   agentMeta: {
     flex: 1,
   },
   agentName: {
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  agentId: {
-    fontSize: 13,
-    marginTop: 2,
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#CBD5E1',
-  },
-  statLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  statVal: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginBottom: 8,
-    marginLeft: 4,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#CBD5E1',
-  },
-  settingInfo: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  settingLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  settingDesc: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  resetBtn: {
-    marginTop: 14,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  resetBtnText: {
-    color: '#3B82F6',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  logoutBtn: {
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#FEE2E2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  logoutBtnText: {
-    color: '#DC2626',
     fontSize: 15,
     fontWeight: '700',
+    color: '#0F172A',
+  },
+  agentEmail: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  signOutBtn: {
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#EF4444',
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  signOutBtnText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  infoFooter: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  infoFooterText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  infoFooterSub: {
+    fontSize: 11,
+    color: '#CBD5E1',
+    marginTop: 4,
   },
 });

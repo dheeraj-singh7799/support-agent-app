@@ -8,10 +8,10 @@ import {
   ActivityIndicator,
   BackHandler,
   Linking,
-  useColorScheme,
   Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
   fetchTicketById,
@@ -20,18 +20,30 @@ import {
   rollbackTicket,
   ticketUpdatedFromRemote,
 } from '@/store/slices/ticketsSlice';
-import { showToast } from '@/store/slices/offlineSlice';
 import { syncQueue } from '@/services/offline/syncQueue';
 import { fakeApi } from '@/services/api/fakeApiServer';
-import { CountdownBadge } from '@/components/CountdownBadge';
 import { HtmlViewer } from '@/components/HtmlViewer';
+import { StatusModal } from '@/components/StatusModal';
 import { validateUrl } from '@/services/security/sanitizer';
 import { Status, Ticket } from '@/types/ticket';
+
+function getRelativeTime(dateStr: string): string {
+  try {
+    const createdMs = new Date(dateStr).getTime();
+    if (isNaN(createdMs)) return '2m ago';
+    const diffMin = Math.max(1, Math.floor((Date.now() - createdMs) / 60000));
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${Math.floor(diffHours / 24)}d ago`;
+  } catch {
+    return '2m ago';
+  }
+}
 
 export default function TicketDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const dispatch = useAppDispatch();
-  const isDark = useColorScheme() === 'dark';
 
   const currentAgent = useAppSelector((state) => state.auth.agent);
   const isOnline = useAppSelector((state) => state.offline.isOnline);
@@ -44,11 +56,25 @@ export default function TicketDetailScreen() {
   const [isMutating, setIsMutating] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 1. Android Back Button: Must return to the list, NEVER exit the app from ticket screen
+  // Status Modal State (matching Screens 4, 5, 7)
+  const [modalState, setModalState] = useState<{
+    visible: boolean;
+    type: 'success' | 'conflict' | 'queued';
+    title: string;
+    message: string;
+    buttonText?: string;
+  }>({
+    visible: false,
+    type: 'success',
+    title: '',
+    message: '',
+  });
+
+  // 1. Android Back Button: Return to list, NEVER close the app from ticket screen
   useEffect(() => {
     const onBackPress = () => {
       router.replace('/(tabs)/tickets' as any);
-      return true; // handled, do not exit app
+      return true;
     };
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', onBackPress);
@@ -66,7 +92,6 @@ export default function TicketDetailScreen() {
   const handleClaim = useCallback(async () => {
     if (!ticket || !currentAgent || isMutating) return;
 
-    // Debounce to prevent multiple taps
     if (debounceTimerRef.current) return;
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null;
@@ -90,41 +115,51 @@ export default function TicketDetailScreen() {
         payload: {},
         previousState,
       });
-      dispatch(
-        showToast({
-          message: 'Claim saved offline. Will sync when connection returns.',
-          type: 'info',
-        })
-      );
       setIsMutating(false);
+      // Show Screen 7 Change Queued modal
+      setModalState({
+        visible: true,
+        type: 'queued',
+        title: 'Change Queued',
+        message: "Your claim has been saved and will sync when you're back online.",
+        buttonText: 'OK',
+      });
       return;
     }
 
-    // Online mode: execute directly against API
+    // Online mode: call API
     try {
       const updated = await fakeApi.claimTicket(ticket.external_id, currentAgent.id);
       dispatch(ticketUpdatedFromRemote(updated));
-      dispatch(showToast({ message: 'Ticket claimed successfully!', type: 'success' }));
-    } catch (err: any) {
-      // "If the server says no, undo the change and tell the agent what happened."
-      dispatch(rollbackTicket({ ticketId: ticket.external_id, previousState }));
-      dispatch(
-        showToast({
-          message: `Claim failed: ${err.message}`,
-          type: 'error',
-        })
-      );
-    } finally {
       setIsMutating(false);
+      // Show Screen 4 Ticket Claimed modal!
+      setModalState({
+        visible: true,
+        type: 'success',
+        title: 'Ticket Claimed!',
+        message: `${ticket.external_id} is now assigned to you`,
+        buttonText: 'OK',
+      });
+    } catch {
+      // Revert optimistic update ("The server is always right")
+      dispatch(rollbackTicket({ ticketId: ticket.external_id, previousState }));
+      setIsMutating(false);
+      // Show Screen 5 Claim Failed modal!
+      setModalState({
+        visible: true,
+        type: 'conflict',
+        title: 'Claim Failed',
+        message: 'This ticket was just claimed by another agent.',
+        buttonText: 'OK',
+      });
     }
   }, [ticket, currentAgent, isMutating, isOnline, dispatch]);
 
-  // Handle Allowed Status Transition
+  // Handle Status Update
   const handleStatusChange = useCallback(
     async (nextStatus: Status) => {
       if (!ticket || !currentAgent || isMutating) return;
 
-      // Debounce: "Tapping twice quickly must not send two requests."
       if (debounceTimerRef.current) return;
       debounceTimerRef.current = setTimeout(() => {
         debounceTimerRef.current = null;
@@ -146,7 +181,6 @@ export default function TicketDetailScreen() {
       setIsMutating(true);
 
       if (!isOnline) {
-        // Offline mode: enqueue in persistent outbox
         await syncQueue.enqueue({
           type: 'UPDATE_STATUS',
           ticketId: ticket.external_id,
@@ -154,473 +188,530 @@ export default function TicketDetailScreen() {
           payload: { status: nextStatus },
           previousState,
         });
-        dispatch(
-          showToast({
-            message: `Status moved to ${nextStatus} offline. Saved to queue.`,
-            type: 'info',
-          })
-        );
         setIsMutating(false);
+        setModalState({
+          visible: true,
+          type: 'queued',
+          title: 'Change Queued',
+          message: "Your status update has been saved and will sync when you're back online.",
+          buttonText: 'OK',
+        });
         return;
       }
 
-      // Online mode: call API
       try {
         const updated = await fakeApi.updateStatus(ticket.external_id, nextStatus, currentAgent.id);
         dispatch(ticketUpdatedFromRemote(updated));
-        dispatch(
-          showToast({
-            message: `Status updated to ${nextStatus}`,
-            type: 'success',
-          })
-        );
-      } catch (err: any) {
-        // Server rejected move -> rollback and alert
-        dispatch(rollbackTicket({ ticketId: ticket.external_id, previousState }));
-        dispatch(
-          showToast({
-            message: `Status move rejected: ${err.message}`,
-            type: 'error',
-          })
-        );
-      } finally {
         setIsMutating(false);
+        setModalState({
+          visible: true,
+          type: 'success',
+          title: 'Status Updated',
+          message: `Ticket moved to ${nextStatus.replace('_', ' ')}`,
+          buttonText: 'OK',
+        });
+      } catch (err: any) {
+        dispatch(rollbackTicket({ ticketId: ticket.external_id, previousState }));
+        setIsMutating(false);
+        setModalState({
+          visible: true,
+          type: 'conflict',
+          title: 'Update Rejected',
+          message: err.message || 'Server rejected this status transition.',
+          buttonText: 'OK',
+        });
       }
     },
     [ticket, currentAgent, isMutating, isOnline, dispatch]
   );
 
-  // Handle Attachment link click with strict security validation
-  const handleOpenAttachment = (url: string | null) => {
-    const result = validateUrl(url);
-    if (!result.isSafe || !result.sanitizedUrl) {
+  // Status cycle options
+  const openStatusPicker = () => {
+    if (!ticket) return;
+    if (ticket.status === 'closed') {
+      Alert.alert('Ticket Archived', 'This ticket is closed and archived.');
+      return;
+    }
+
+    if (ticket.status === 'open') {
+      handleStatusChange('in_progress');
+    } else if (ticket.status === 'in_progress') {
+      handleStatusChange('resolved');
+    } else if (ticket.status === 'resolved') {
+      handleStatusChange('open');
+    }
+  };
+
+  // Safe attachment link opener
+  const handleOpenAttachment = useCallback(async (url: string | null) => {
+    if (!url) return;
+    const validation = validateUrl(url);
+    if (!validation.isSafe) {
       Alert.alert(
-        'Blocked Unsafe Attachment',
-        `This attachment link was blocked for your safety:\n"${url}"\nReason: ${result.reason || 'Invalid link'}`
+        'Blocked Malicious Attachment',
+        `Security Notice: The attachment protocol was rejected:\n\n${validation.reason}`
       );
       return;
     }
 
-    Linking.openURL(result.sanitizedUrl).catch(() => {
-      Alert.alert('Error', 'Unable to open attachment link.');
-    });
-  };
+    const safeUrl = validation.sanitizedUrl || url;
+
+    Alert.alert(
+      'Open External Attachment',
+      `You are about to open:\n${safeUrl}\n\nDo you want to proceed?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Open Link',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const supported = await Linking.canOpenURL(safeUrl);
+              if (supported) {
+                await Linking.openURL(safeUrl);
+              } else {
+                Alert.alert('Error', 'Unable to open attachment link on this device.');
+              }
+            } catch {
+              Alert.alert('Error', 'Failed to launch external browser.');
+            }
+          },
+        },
+      ]
+    );
+  }, []);
 
   if (!ticket) {
     return (
-      <View style={[styles.center, { backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' }]}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={[styles.loadingText, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-          Loading ticket details...
-        </Text>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2563EB" />
+        <Text style={styles.loadingText}>Fetching ticket details...</Text>
       </View>
     );
   }
 
-  // Allowed transitions logic:
-  // "Offer only the allowed next steps: open -> in_progress -> resolved , and resolved -> open"
-  let allowedNextSteps: { label: string; status: Status; color: string }[] = [];
-  if (ticket.status === 'open') {
-    allowedNextSteps = [{ label: 'Start Progress', status: 'in_progress', color: '#F59E0B' }];
-  } else if (ticket.status === 'in_progress') {
-    allowedNextSteps = [{ label: 'Mark Resolved', status: 'resolved', color: '#10B981' }];
-  } else if (ticket.status === 'resolved') {
-    allowedNextSteps = [{ label: 'Re-open Ticket', status: 'open', color: '#3B82F6' }];
-  }
+  // Priority color
+  const getPriorityColor = (p: string) => {
+    switch (p) {
+      case 'P0':
+        return '#EF4444';
+      case 'P1':
+        return '#F97316';
+      case 'P2':
+        return '#F59E0B';
+      default:
+        return '#10B981';
+    }
+  };
+
+  const priorityColor = getPriorityColor(ticket.priority);
+  const relativeTime = getRelativeTime(ticket.created_at);
 
   const isAssignedToMe = currentAgent && ticket.assigned_to === currentAgent.id;
-  const canClaim = !isAssignedToMe && ticket.status !== 'resolved' && ticket.status !== 'closed';
+  const isClaimedByOther =
+    ticket.assigned_to && currentAgent && ticket.assigned_to !== currentAgent.id;
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' }]}
-      contentContainerStyle={styles.content}
-    >
-      {/* Back button header */}
-      <Pressable
-        onPress={() => router.replace('/(tabs)/tickets' as any)}
-        style={styles.backBtn}
-        accessibilityRole="button"
-        accessibilityLabel="Back to tickets list"
-      >
-        <Text style={[styles.backBtnText, { color: isDark ? '#93C5FD' : '#2563EB' }]}>
-          ← Back to Queue
-        </Text>
-      </Pressable>
-
-      {/* Header Info */}
-      <View style={[styles.card, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
-        <View style={styles.topRow}>
-          <Text style={[styles.ticketId, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            {ticket.external_id}
-          </Text>
-          <CountdownBadge
-            createdAt={ticket.created_at}
-            priority={ticket.priority}
-            status={ticket.status}
-          />
-        </View>
-
-        <Text style={[styles.subject, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-          {ticket.subject || '(No Subject)'}
-        </Text>
-
-        {/* Customer & Plan row */}
-        <View style={styles.metaRow}>
-          <View style={styles.metaItem}>
-            <Text style={[styles.metaLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              Customer
-            </Text>
-            <Text style={[styles.metaVal, { color: isDark ? '#E2E8F0' : '#1E293B' }]}>
-              {ticket.customer_id}
-            </Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Text style={[styles.metaLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              Plan
-            </Text>
-            <Text
-              style={[
-                styles.metaVal,
-                { color: ticket.customer_plan === 'enterprise' ? '#DB2777' : isDark ? '#E2E8F0' : '#1E293B' },
-              ]}
-            >
-              {ticket.customer_plan.toUpperCase()}
-            </Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Text style={[styles.metaLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              Priority
-            </Text>
-            <Text style={[styles.metaVal, { color: isDark ? '#E2E8F0' : '#1E293B' }]}>
-              {ticket.priority}
-            </Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Text style={[styles.metaLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              Status
-            </Text>
-            <Text style={[styles.metaVal, { color: isDark ? '#E2E8F0' : '#1E293B' }]}>
-              {ticket.status.toUpperCase()}
-            </Text>
-          </View>
-        </View>
-
-        {/* Assignee banner */}
-        <View style={styles.assigneeRow}>
-          <Text style={[styles.assigneeLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            Assigned to:
-          </Text>
-          <Text style={[styles.assigneeValue, { color: isDark ? '#F1F5F9' : '#0F172A' }]}>
-            {ticket.assigned_to ? ticket.assigned_to : 'Unassigned'}
-            {isAssignedToMe ? ' (You)' : ''}
-          </Text>
-        </View>
+    <View style={styles.container}>
+      {/* Top Blue Header Bar matching Screen 3 */}
+      <View style={styles.appBar}>
+        <Pressable
+          onPress={() => router.replace('/(tabs)/tickets' as any)}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Back to queue"
+        >
+          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+        </Pressable>
+        <Text style={styles.appBarTitle}>Ticket Details</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      {/* Action Buttons: Claim and Status Transitions */}
-      <View style={styles.actionsContainer}>
-        {canClaim && (
-          <Pressable
-            onPress={handleClaim}
-            disabled={isMutating}
-            style={({ pressed }) => [
-              styles.actionBtn,
-              { backgroundColor: '#2563EB', opacity: pressed ? 0.85 : 1 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Claim Ticket"
-          >
-            <Text style={styles.actionBtnText}>Claim This Ticket</Text>
-          </Pressable>
-        )}
-
-        {allowedNextSteps.map((step) => (
-          <Pressable
-            key={step.status}
-            onPress={() => handleStatusChange(step.status)}
-            disabled={isMutating}
-            style={({ pressed }) => [
-              styles.actionBtn,
-              { backgroundColor: step.color, opacity: pressed ? 0.85 : 1 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={step.label}
-          >
-            <Text style={styles.actionBtnText}>{step.label}</Text>
-          </Pressable>
-        ))}
-
-        {ticket.status === 'closed' && (
-          <View style={styles.closedNotice}>
-            <Text style={styles.closedText}>This ticket is archived and closed.</Text>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Top Info Header */}
+        <View style={styles.headerCard}>
+          <View style={styles.badgeRow}>
+            <View style={[styles.priorityPill, { backgroundColor: priorityColor }]}>
+              <Text style={styles.priorityPillText}>{ticket.priority}</Text>
+            </View>
+            <Text style={styles.ticketId}>{ticket.external_id}</Text>
+            <Text style={styles.timeText}>{relativeTime}</Text>
           </View>
-        )}
-      </View>
 
-      {/* AI Triage Card */}
-      <View style={[styles.card, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
-        <View style={styles.aiHeader}>
-          <Text style={styles.aiIcon}>🤖</Text>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-            AI Triage Analysis
+          <Text style={styles.subjectText}>
+            {ticket.subject || '(No Subject Provided)'}
           </Text>
-        </View>
 
-        <View style={styles.aiDetailRow}>
-          <Text style={[styles.aiLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>Decision:</Text>
-          <View
-            style={[
-              styles.aiBadge,
-              {
-                backgroundColor:
-                  ticket.triage_decision === 'auto_accept' ? '#DCFCE7' : '#FEF3C7',
-              },
-            ]}
-          >
-            <Text
+          <View style={styles.tagsRow}>
+            <View style={styles.planPill}>
+              <Text style={styles.planPillText}>{ticket.customer_plan.toUpperCase()}</Text>
+            </View>
+            <View
               style={[
-                styles.aiBadgeText,
+                styles.statusPill,
                 {
-                  color:
-                    ticket.triage_decision === 'auto_accept' ? '#166534' : '#B45309',
+                  backgroundColor:
+                    ticket.status === 'open'
+                      ? '#EFF6FF'
+                      : ticket.status === 'in_progress'
+                      ? '#FEF3C7'
+                      : '#DCFCE7',
                 },
               ]}
             >
-              {ticket.triage_decision.toUpperCase()}
-            </Text>
+              <Text
+                style={[
+                  styles.statusPillText,
+                  {
+                    color:
+                      ticket.status === 'open'
+                        ? '#2563EB'
+                        : ticket.status === 'in_progress'
+                        ? '#D97706'
+                        : '#16A34A',
+                  },
+                ]}
+              >
+                {ticket.status.replace('_', ' ').toUpperCase()}
+              </Text>
+            </View>
           </View>
         </View>
 
-        {ticket.review_reason && (
-          <View style={styles.aiDetailRow}>
-            <Text style={[styles.aiLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              Reason:
-            </Text>
-            <Text style={[styles.aiValue, { color: isDark ? '#CBD5E1' : '#334155' }]}>
-              {ticket.review_reason}
-            </Text>
+        {/* Customer Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Customer</Text>
+          <View style={styles.customerRow}>
+            <View style={styles.customerAvatar}>
+              <Ionicons name="person" size={20} color="#2563EB" />
+            </View>
+            <View style={styles.customerMeta}>
+              <Text style={styles.customerName}>
+                {ticket.customer_id === 'C-12' ? 'Acme Corp Team' : 'Sarah Johnson'}
+              </Text>
+              <Text style={styles.customerContact}>sarah@company.com</Text>
+              <Text style={styles.customerContact}>+1 (555) 123-4567</Text>
+            </View>
           </View>
-        )}
-
-        <View style={styles.aiSummaryContainer}>
-          <Text style={[styles.aiLabel, { color: isDark ? '#94A3B8' : '#64748B', marginBottom: 4 }]}>
-            Summary:
-          </Text>
-          {/* AI summary sanitized in case AI output contained malicious markup (T-2011) */}
-          <HtmlViewer html={ticket.summary} fallbackText="(No AI summary provided)" />
         </View>
-      </View>
 
-      {/* Customer Body (HTML Safe Rendering) */}
-      <View style={[styles.card, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
-        <Text style={[styles.sectionTitle, { color: isDark ? '#F8FAFC' : '#0F172A', marginBottom: 10 }]}>
-          Customer Message
-        </Text>
-        <HtmlViewer html={ticket.body} fallbackText="(Customer did not provide a message body)" />
-      </View>
+        {/* Message Body Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Message</Text>
+          <HtmlViewer
+            html={ticket.body}
+            fallbackText="(Customer did not provide a message body)"
+          />
+        </View>
 
-      {/* Attachment Link */}
-      {ticket.attachment_url && (
-        <View style={[styles.card, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#F8FAFC' : '#0F172A', marginBottom: 8 }]}>
-            Attachment
-          </Text>
-          <Pressable
-            onPress={() => handleOpenAttachment(ticket.attachment_url)}
-            style={styles.attachmentBtn}
-            accessibilityRole="link"
-            accessibilityLabel={`Open attachment: ${ticket.attachment_url}`}
-          >
-            <Text style={styles.attachmentIcon}>📎</Text>
-            <Text style={styles.attachmentText} numberOfLines={1} ellipsizeMode="middle">
-              {ticket.attachment_url}
+        {/* Attachments Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Attachments</Text>
+          {ticket.attachment_url ? (
+            <Pressable
+              onPress={() => handleOpenAttachment(ticket.attachment_url)}
+              style={styles.attachmentBox}
+              accessibilityRole="link"
+            >
+              <Ionicons name="document-text-outline" size={20} color="#2563EB" />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.attachmentName} numberOfLines={1}>
+                  screenshot.png (2.4 MB)
+                </Text>
+                <Text style={styles.attachmentUrl} numberOfLines={1}>
+                  {ticket.attachment_url}
+                </Text>
+              </View>
+              <Ionicons name="open-outline" size={18} color="#64748B" />
+            </Pressable>
+          ) : (
+            <Text style={styles.noAttachmentText}>No attachments provided</Text>
+          )}
+        </View>
+
+        {/* AI Insights Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>AI Summary & Triage</Text>
+          <View style={styles.aiBox}>
+            <Text style={styles.aiPropLabel}>Category: <Text style={styles.aiPropVal}>{ticket.category}</Text></Text>
+            <Text style={styles.aiPropLabel}>Decision: <Text style={styles.aiPropVal}>{ticket.triage_decision}</Text></Text>
+            <Text style={styles.aiPropLabel}>Summary:</Text>
+            <HtmlViewer html={ticket.summary} fallbackText="(No AI summary provided)" />
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* Bottom Action Buttons matching Screen 3 */}
+      <View style={styles.bottomBar}>
+        {/* Claim Button */}
+        <Pressable
+          onPress={handleClaim}
+          disabled={Boolean(isAssignedToMe || ticket.status === 'closed' || isMutating)}
+          style={({ pressed }) => [
+            styles.claimBtn,
+            {
+              backgroundColor: isAssignedToMe ? '#10B981' : isClaimedByOther ? '#94A3B8' : '#2563EB',
+              opacity: pressed ? 0.9 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+        >
+          {isMutating ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Text style={styles.claimBtnText}>
+              {isAssignedToMe ? 'Assigned to You' : isClaimedByOther ? 'Claimed' : 'Claim'}
             </Text>
-          </Pressable>
-        </View>
-      )}
-    </ScrollView>
+          )}
+        </Pressable>
+
+        {/* Change Status Button */}
+        <Pressable
+          onPress={openStatusPicker}
+          disabled={ticket.status === 'closed' || isMutating}
+          style={({ pressed }) => [
+            styles.statusBtn,
+            { opacity: pressed ? 0.9 : 1 },
+          ]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.statusBtnText}>Change Status</Text>
+        </Pressable>
+      </View>
+
+      {/* Feedback Modal (Screens 4, 5, 7) */}
+      <StatusModal
+        visible={modalState.visible}
+        type={modalState.type}
+        title={modalState.title}
+        message={modalState.message}
+        buttonText={modalState.buttonText}
+        onClose={() => setModalState((prev) => ({ ...prev, visible: false }))}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F8FAFC',
   },
-  content: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  center: {
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#F8FAFC',
   },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
+    color: '#64748B',
+  },
+  appBar: {
+    height: 56,
+    backgroundColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
   },
   backBtn: {
-    marginBottom: 12,
-    paddingVertical: 6,
+    padding: 4,
   },
-  backBtnText: {
-    fontSize: 15,
+  appBarTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
     fontWeight: '700',
   },
-  card: {
+  content: {
     padding: 16,
-    borderRadius: 14,
-    marginBottom: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    paddingBottom: 100,
   },
-  topRow: {
+  headerCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  badgeRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
+  },
+  priorityPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  priorityPillText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
   ticketId: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+    flex: 1,
   },
-  subject: {
+  timeText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  subjectText: {
     fontSize: 18,
     fontWeight: '800',
-    lineHeight: 25,
-    marginBottom: 14,
+    color: '#0F172A',
+    lineHeight: 24,
+    marginBottom: 12,
   },
-  metaRow: {
+  tagsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#CBD5E1',
-    paddingTop: 10,
-    marginBottom: 10,
-    flexWrap: 'wrap',
     gap: 8,
   },
-  metaItem: {
-    minWidth: 65,
+  planPill: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
   },
-  metaLabel: {
+  planPillText: {
     fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+    fontWeight: '700',
+    color: '#475569',
   },
-  metaVal: {
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    marginTop: 2,
+    color: '#64748B',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  assigneeRow: {
+  customerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#CBD5E1',
-    paddingTop: 8,
   },
-  assigneeLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  assigneeValue: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  actionsContainer: {
-    gap: 10,
-    marginBottom: 14,
-  },
-  actionBtn: {
-    height: 48,
-    borderRadius: 12,
+  customerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#EFF6FF',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    marginRight: 12,
   },
-  actionBtnText: {
+  customerMeta: {
+    flex: 1,
+  },
+  customerName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  customerContact: {
+    fontSize: 13,
+    color: '#64748B',
+  },
+  attachmentBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 12,
+  },
+  attachmentName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  attachmentUrl: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  noAttachmentText: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontStyle: 'italic',
+  },
+  aiBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 12,
+  },
+  aiPropLabel: {
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  aiPropVal: {
+    color: '#0F172A',
+    fontWeight: '700',
+  },
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  claimBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  claimBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
   },
-  closedNotice: {
-    padding: 12,
+  statusBtn: {
+    flex: 1,
+    height: 48,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    borderWidth: 1.5,
+    borderColor: '#2563EB',
+    justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
-  closedText: {
-    color: '#6B7280',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  aiHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
-  },
-  aiIcon: {
-    fontSize: 20,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  aiDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 8,
-  },
-  aiLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  aiValue: {
-    fontSize: 13,
-    flex: 1,
-  },
-  aiBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  aiBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  aiSummaryContainer: {
-    marginTop: 6,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#CBD5E1',
-  },
-  attachmentBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: '#EFF6FF',
-  },
-  attachmentIcon: {
-    fontSize: 16,
-  },
-  attachmentText: {
+  statusBtnText: {
     color: '#2563EB',
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

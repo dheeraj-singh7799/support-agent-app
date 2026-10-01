@@ -9,9 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  useColorScheme,
+  Modal,
 } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { loginAgent, clearAuthError } from '@/store/slices/authSlice';
 import { KNOWN_AGENTS } from '@/types/ticket';
@@ -20,10 +21,12 @@ import { fakeApi } from '@/services/api/fakeApiServer';
 export default function LoginScreen() {
   const dispatch = useAppDispatch();
   const { isLoading, error } = useAppSelector((state) => state.auth);
-  const isDark = useColorScheme() === 'dark';
 
   const [selectedAgentId, setSelectedAgentId] = useState<string>('agent-1');
-  const [pin, setPin] = useState<string>('');
+  const [pin, setPin] = useState<string>('1234');
+  const [pickerVisible, setPickerVisible] = useState<boolean>(false);
+
+  const selectedAgent = KNOWN_AGENTS.find((a) => a.id === selectedAgentId) || KNOWN_AGENTS[0];
 
   const handleLogin = async () => {
     if (pin.length !== 4) return;
@@ -39,97 +42,47 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={[
-        styles.container,
-        { backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' },
-      ]}
+      style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Header */}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Top Branding */}
         <View style={styles.header}>
-          <View style={styles.iconCircle}>
-            <Text style={styles.iconText}>🎧</Text>
+          <View style={styles.iconRing}>
+            <View style={styles.iconCircle}>
+              <Ionicons name="headset" size={44} color="#FFFFFF" />
+            </View>
           </View>
-          <Text style={[styles.title, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-            Support Agent
-          </Text>
-          <Text style={[styles.subtitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            Sign in to access and manage live queue tickets on the move
-          </Text>
+          <Text style={styles.appTitle}>Support Agent</Text>
+          <Text style={styles.appSubtitle}>Customer Support Made Simple</Text>
         </View>
 
-        {/* Agent Selector */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: isDark ? '#CBD5E1' : '#334155' }]}>
-            SELECT AGENT PROFILE
-          </Text>
-          <View style={styles.agentList}>
-            {KNOWN_AGENTS.map((agent) => {
-              const isSelected = selectedAgentId === agent.id;
-              return (
-                <Pressable
-                  key={agent.id}
-                  onPress={() => setSelectedAgentId(agent.id)}
-                  style={[
-                    styles.agentCard,
-                    {
-                      backgroundColor: isSelected
-                        ? isDark
-                          ? '#1E3A8A'
-                          : '#EFF6FF'
-                        : isDark
-                        ? '#1E293B'
-                        : '#FFFFFF',
-                      borderColor: isSelected
-                        ? '#3B82F6'
-                        : isDark
-                        ? '#334155'
-                        : '#E2E8F0',
-                    },
-                  ]}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: isSelected }}
-                  accessibilityLabel={`${agent.name} (${agent.id})`}
-                >
-                  <View style={[styles.avatar, { backgroundColor: isSelected ? '#3B82F6' : '#94A3B8' }]}>
-                    <Text style={styles.avatarText}>{agent.name[0]}</Text>
-                  </View>
-                  <View style={styles.agentInfo}>
-                    <Text
-                      style={[
-                        styles.agentName,
-                        { color: isSelected ? (isDark ? '#93C5FD' : '#1D4ED8') : isDark ? '#F1F5F9' : '#0F172A' },
-                      ]}
-                    >
-                      {agent.name}
-                    </Text>
-                    <Text style={[styles.agentId, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-                      {agent.id}
-                    </Text>
-                  </View>
-                  {isSelected && <Text style={styles.checkmark}>✓</Text>}
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
+        {/* Center Floating White Card */}
+        <View style={styles.loginCard}>
+          {/* Select Agent Dropdown */}
+          <Text style={styles.fieldLabel}>Select Agent</Text>
+          <Pressable
+            onPress={() => setPickerVisible(true)}
+            style={styles.dropdownBtn}
+            accessibilityRole="combobox"
+            accessibilityLabel={`Selected agent: ${selectedAgent.name}`}
+          >
+            <View style={styles.dropdownLeft}>
+              <Ionicons name="person-outline" size={18} color="#64748B" style={{ marginRight: 10 }} />
+              <Text style={styles.dropdownText}>{selectedAgent.name}</Text>
+            </View>
+            <Ionicons name="chevron-down" size={18} color="#64748B" />
+          </Pressable>
 
-        {/* 4-Digit PIN */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: isDark ? '#CBD5E1' : '#334155' }]}>
-            4-DIGIT PIN
-          </Text>
+          {/* 4-Digit PIN */}
+          <Text style={[styles.fieldLabel, { marginTop: 18 }]}>Enter 4-digit PIN</Text>
           <TextInput
-            style={[
-              styles.pinInput,
-              {
-                backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-                borderColor: error ? '#EF4444' : isDark ? '#334155' : '#CBD5E1',
-                color: isDark ? '#F8FAFC' : '#0F172A',
-              },
-            ]}
+            style={[styles.pinInput, error ? styles.pinInputError : null]}
             placeholder="••••"
-            placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+            placeholderTextColor="#94A3B8"
             keyboardType="number-pad"
             maxLength={4}
             secureTextEntry
@@ -140,34 +93,72 @@ export default function LoginScreen() {
             }}
             accessibilityLabel="Enter 4-digit PIN"
           />
-          <Text style={[styles.hint, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            Use default PIN <Text style={{ fontWeight: '700' }}>1234</Text> for any agent.
-          </Text>
 
           {error && <Text style={styles.errorText}>{error}</Text>}
+
+          {/* Sign In Button */}
+          <Pressable
+            onPress={handleLogin}
+            disabled={pin.length !== 4 || isLoading}
+            style={({ pressed }) => [
+              styles.signInBtn,
+              {
+                backgroundColor: pin.length === 4 ? '#2563EB' : '#93C5FD',
+                opacity: pressed ? 0.9 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Sign In"
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.signInBtnText}>Sign In</Text>
+            )}
+          </Pressable>
         </View>
 
-        {/* Submit Button */}
-        <Pressable
-          onPress={handleLogin}
-          disabled={pin.length !== 4 || isLoading}
-          style={({ pressed }) => [
-            styles.submitBtn,
-            {
-              backgroundColor: pin.length === 4 ? '#2563EB' : isDark ? '#334155' : '#CBD5E1',
-              opacity: pressed ? 0.9 : 1,
-            },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Sign In"
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.submitBtnText}>Sign In</Text>
-          )}
-        </Pressable>
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Demo App • Expo</Text>
+        </View>
       </ScrollView>
+
+      {/* Agent Selection Modal */}
+      <Modal
+        visible={pickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setPickerVisible(false)}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Choose Agent Profile</Text>
+            {KNOWN_AGENTS.map((agent) => {
+              const isSelected = agent.id === selectedAgentId;
+              return (
+                <Pressable
+                  key={agent.id}
+                  onPress={() => {
+                    setSelectedAgentId(agent.id);
+                    setPickerVisible(false);
+                  }}
+                  style={[styles.agentOption, isSelected ? styles.agentOptionSelected : null]}
+                >
+                  <View style={styles.agentOptionAvatar}>
+                    <Text style={styles.agentOptionAvatarText}>{agent.name[0]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.agentOptionName}>{agent.name}</Text>
+                    <Text style={styles.agentOptionId}>{agent.id}</Text>
+                  </View>
+                  {isSelected && <Ionicons name="checkmark-circle" size={22} color="#2563EB" />}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -175,125 +166,182 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#1E40AF', // Deep Royal Blue background
   },
   scrollContent: {
-    padding: 24,
-    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 48,
     minHeight: '100%',
+    justifyContent: 'center',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
-    marginTop: 20,
+    marginBottom: 36,
+  },
+  iconRing: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   iconCircle: {
     width: 68,
     height: 68,
     borderRadius: 34,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
   },
-  iconText: {
-    fontSize: 32,
-  },
-  title: {
-    fontSize: 26,
+  appTitle: {
+    fontSize: 28,
     fontWeight: '800',
+    color: '#FFFFFF',
     letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  appSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontWeight: '500',
+  },
+  loginCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
     marginBottom: 8,
   },
-  subtitle: {
-    fontSize: 14,
-    textAlign: 'center',
-    maxWidth: 300,
-    lineHeight: 20,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginBottom: 10,
-  },
-  agentList: {
-    gap: 10,
-  },
-  agentCard: {
+  dropdownBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 14,
+    justifyContent: 'space-between',
+    height: 48,
     borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#FFFFFF',
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
+  dropdownLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
   },
-  avatarText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 16,
-  },
-  agentInfo: {
-    flex: 1,
-  },
-  agentName: {
+  dropdownText: {
     fontSize: 15,
-    fontWeight: '700',
-  },
-  agentId: {
-    fontSize: 12,
-  },
-  checkmark: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#3B82F6',
-    marginRight: 6,
+    fontWeight: '600',
+    color: '#0F172A',
   },
   pinInput: {
-    height: 52,
-    borderRadius: 12,
+    height: 48,
     borderWidth: 1.5,
-    fontSize: 22,
-    fontWeight: '800',
-    textAlign: 'center',
-    letterSpacing: 10,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    fontSize: 20,
+    color: '#0F172A',
+    fontWeight: '700',
+    letterSpacing: 6,
   },
-  hint: {
-    fontSize: 12,
-    marginTop: 6,
-    textAlign: 'center',
+  pinInputError: {
+    borderColor: '#EF4444',
   },
   errorText: {
     color: '#EF4444',
     fontSize: 13,
     fontWeight: '600',
     marginTop: 8,
-    textAlign: 'center',
   },
-  submitBtn: {
-    height: 52,
-    borderRadius: 14,
+  signInBtn: {
+    height: 48,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    marginTop: 22,
   },
-  submitBtnText: {
+  signInBtnText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  footer: {
+    marginTop: 32,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  agentOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  agentOptionSelected: {
+    backgroundColor: '#EFF6FF',
+  },
+  agentOptionAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  agentOptionAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  agentOptionName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  agentOptionId: {
+    fontSize: 12,
+    color: '#64748B',
   },
 });

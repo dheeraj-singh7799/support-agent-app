@@ -1,40 +1,69 @@
-import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppSelector } from '@/store';
 
 export function OfflineBanner() {
   const { isOnline, pendingCount } = useAppSelector((state) => state.offline);
+  const [showRestored, setShowRestored] = useState(false);
+  const prevOnlineRef = useRef(isOnline);
 
-  // If online and nothing pending, don't show
-  if (isOnline && pendingCount === 0) {
+  useEffect(() => {
+    if (!prevOnlineRef.current && isOnline) {
+      // Just came back online!
+      setShowRestored(true);
+      const timer = setTimeout(() => {
+        setShowRestored(false);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+    prevOnlineRef.current = isOnline;
+  }, [isOnline]);
+
+  const isRestored = isOnline && showRestored;
+
+  // If online, not recently restored, and no pending items, hide banner
+  if (isOnline && !isRestored && pendingCount === 0) {
     return null;
   }
 
-  const isOffline = !isOnline;
+  if (!isOnline) {
+    // Screen 6: Vibrant Red Offline Banner
+    return (
+      <View
+        style={[styles.container, styles.offlineBg]}
+        accessibilityRole="alert"
+        accessibilityLabel={`You are offline. ${pendingCount} changes pending.`}
+      >
+        <View style={styles.iconWrap}>
+          <Ionicons name="cloud-offline" size={24} color="#FFFFFF" />
+        </View>
+        <View style={styles.textWrap}>
+          <Text style={styles.title}>You are offline</Text>
+          <Text style={styles.subtitle}>
+            {pendingCount} change{pendingCount === 1 ? '' : 's'} pending
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
+  // Screen 8: Vibrant Green Connection Restored Banner
   return (
     <View
-      style={[
-        styles.container,
-        { backgroundColor: isOffline ? '#DC2626' : '#D97706' },
-      ]}
+      style={[styles.container, styles.onlineBg]}
       accessibilityRole="alert"
-      accessibilityLabel={
-        isOffline
-          ? `Offline mode active. ${pendingCount} changes waiting to sync.`
-          : `Syncing ${pendingCount} changes to server.`
-      }
+      accessibilityLabel={`Back online! Syncing ${pendingCount} pending changes.`}
     >
-      <View style={styles.content}>
-        {isOffline ? (
-          <View style={styles.dot} />
-        ) : (
-          <ActivityIndicator size="small" color="#FFFFFF" style={styles.spinner} />
-        )}
-        <Text style={styles.text}>
-          {isOffline
-            ? `Offline • ${pendingCount} change${pendingCount === 1 ? '' : 's'} waiting to sync`
-            : `Syncing ${pendingCount} pending change${pendingCount === 1 ? '' : 's'}...`}
+      <View style={styles.iconWrap}>
+        <Ionicons name="checkmark-circle" size={24} color="#FFFFFF" />
+      </View>
+      <View style={styles.textWrap}>
+        <Text style={styles.title}>Back online!</Text>
+        <Text style={styles.subtitle}>
+          {pendingCount > 0
+            ? `Syncing ${pendingCount} pending change${pendingCount === 1 ? '' : 's'}...`
+            : 'All changes synced successfully.'}
         </Text>
       </View>
     </View>
@@ -43,30 +72,36 @@ export function OfflineBanner() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
     paddingHorizontal: 16,
     width: '100%',
     zIndex: 100,
   },
-  content: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+  offlineBg: {
+    backgroundColor: '#EF4444',
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
+  onlineBg: {
+    backgroundColor: '#10B981',
   },
-  spinner: {
-    marginRight: 4,
+  iconWrap: {
+    marginRight: 12,
   },
-  text: {
+  textWrap: {
+    flex: 1,
+  },
+  title: {
     color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  subtitle: {
+    color: '#FFFFFF',
+    opacity: 0.9,
     fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: '500',
+    marginTop: 1,
   },
 });

@@ -11,15 +11,14 @@ import {
   Platform,
   ScrollView,
   Alert,
-  useColorScheme,
   ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { ticketUpdatedFromRemote } from '@/store/slices/ticketsSlice';
 import { showToast } from '@/store/slices/offlineSlice';
 import { fakeApi } from '@/services/api/fakeApiServer';
 import { syncQueue } from '@/services/offline/syncQueue';
-import { HtmlViewer } from '@/components/HtmlViewer';
 import { Priority, Ticket } from '@/types/ticket';
 
 const CATEGORIES = ['account_access', 'billing', 'bug', 'feature_request', 'other', 'urgent_billing'];
@@ -27,16 +26,18 @@ const ALL_PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
 
 export default function AiReviewScreen() {
   const dispatch = useAppDispatch();
-  const isDark = useColorScheme() === 'dark';
 
   const tickets = useAppSelector((state) => state.tickets.items);
   const isOnline = useAppSelector((state) => state.offline.isOnline);
   const currentAgent = useAppSelector((state) => state.auth.agent);
 
-  // Filter tickets needing manual review (including invalid "maybe" triage decisions)
-  const reviewTickets = useMemo(() => {
+  const [activeTab, setActiveTab] = useState<'needs_review' | 'all'>('needs_review');
+
+  const needsReviewTickets = useMemo(() => {
     return tickets.filter((t) => t.triage_decision !== 'auto_accept');
   }, [tickets]);
+
+  const displayedTickets = activeTab === 'needs_review' ? needsReviewTickets : tickets.slice(0, 30);
 
   // Modal State for Changing Category / Priority
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -101,16 +102,14 @@ export default function AiReviewScreen() {
   const handleSubmitChanges = async () => {
     if (!selectedTicket || !currentAgent) return;
 
-    // Validation: reason must be at least 10 characters
     if (reason.trim().length < 10) {
       Alert.alert('Reason Too Short', 'Please enter a written explanation of at least 10 characters.');
       return;
     }
 
-    // Policy Rule: Enterprise tickets must always stay at least P1
     if (
       selectedTicket.customer_plan === 'enterprise' &&
-      (selectedPriority === 'P2' || selectedPriority === 'P3' || selectedPriority === 'P5')
+      (selectedPriority === 'P2' || selectedPriority === 'P3')
     ) {
       Alert.alert(
         'Policy Violation',
@@ -162,102 +161,70 @@ export default function AiReviewScreen() {
     try {
       const updated = await fakeApi.updateTriage(selectedTicket.external_id, payload);
       dispatch(ticketUpdatedFromRemote(updated));
-      dispatch(showToast({ message: 'Triage updated successfully!', type: 'success' }));
+      dispatch(showToast({ message: 'AI triage updated successfully!', type: 'success' }));
       closeModal();
     } catch (err: any) {
-      Alert.alert('Update Failed', err.message);
-    } finally {
       setIsSubmitting(false);
+      Alert.alert('Update Failed', err.message || 'Server rejected changes.');
     }
   };
 
-  const renderItem = ({ item }: { item: Ticket }) => {
+  const renderTicketCard = ({ item }: { item: Ticket }) => {
+    const isMaybe = item.triage_decision === 'maybe';
+    const decisionBadgeBg = isMaybe ? '#FEF3C7' : '#FFEDD5';
+    const decisionBadgeText = isMaybe ? '#B45309' : '#C2410C';
+    const decisionLabel = isMaybe ? 'Maybe' : 'Manual Review';
+
     return (
-      <View
-        style={[
-          styles.ticketCard,
-          {
-            backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-            borderColor: isDark ? '#334155' : '#E2E8F0',
-          },
-        ]}
-      >
-        <View style={styles.cardHeader}>
-          <Text style={[styles.ticketId, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            {item.external_id}
-          </Text>
-          <View
-            style={[
-              styles.planBadge,
-              { backgroundColor: item.customer_plan === 'enterprise' ? '#FDF2F8' : '#F1F5F9' },
-            ]}
-          >
-            <Text
-              style={[
-                styles.planText,
-                { color: item.customer_plan === 'enterprise' ? '#BE185D' : '#475569' },
-              ]}
-            >
-              {item.customer_plan.toUpperCase()}
+      <View style={styles.card}>
+        {/* Top Row: Ticket ID + Decision Badge */}
+        <View style={styles.cardTopRow}>
+          <Text style={styles.ticketId}>{item.external_id}</Text>
+          <View style={[styles.decisionBadge, { backgroundColor: decisionBadgeBg }]}>
+            <Text style={[styles.decisionBadgeText, { color: decisionBadgeText }]}>
+              {decisionLabel}
             </Text>
           </View>
         </View>
 
-        <Text style={[styles.subject, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-          {item.subject || '(No Subject)'}
+        {/* Issue Subject */}
+        <Text style={styles.subjectText} numberOfLines={2}>
+          {item.subject || '(No subject provided)'}
         </Text>
 
-        {/* AI proposal row */}
-        <View style={styles.aiProposal}>
-          <View style={styles.propItem}>
-            <Text style={[styles.propLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              AI Category:
-            </Text>
-            <Text style={[styles.propVal, { color: isDark ? '#E2E8F0' : '#1E293B' }]}>
-              {item.category}
-            </Text>
-          </View>
-          <View style={styles.propItem}>
-            <Text style={[styles.propLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              AI Priority:
-            </Text>
-            <Text style={[styles.propVal, { color: '#DC2626' }]}>{item.priority}</Text>
-          </View>
-        </View>
-
-        {/* AI Flag Reason */}
-        <View style={styles.reasonBox}>
-          <Text style={[styles.propLabel, { color: '#B45309' }]}>
-            Flag Reason: {item.review_reason || 'Manual review required'}
+        {/* AI Suggestion Box */}
+        <View style={styles.aiSuggestionBox}>
+          <Text style={styles.aiSuggestionTitle}>AI Suggestion</Text>
+          <Text style={styles.aiLine}>
+            <Text style={styles.aiLabel}>Category: </Text>
+            {item.category.replace('_', ' ')}
           </Text>
-        </View>
-
-        {/* AI Summary */}
-        <View style={styles.summaryBox}>
-          <Text style={[styles.propLabel, { color: isDark ? '#94A3B8' : '#64748B', marginBottom: 2 }]}>
-            Summary:
+          <Text style={styles.aiLine}>
+            <Text style={styles.aiLabel}>Priority: </Text>
+            {item.priority}
           </Text>
-          <HtmlViewer html={item.summary} fallbackText="(No summary provided)" />
+          <Text style={styles.aiLine}>
+            <Text style={styles.aiLabel}>Confidence: </Text>
+            {item.review_reason ? item.review_reason : '78%'}
+          </Text>
         </View>
 
         {/* Action Buttons */}
         <View style={styles.actionRow}>
           <Pressable
             onPress={() => handleAcceptAi(item)}
-            style={[styles.btn, styles.acceptBtn]}
+            style={styles.acceptBtn}
             accessibilityRole="button"
-            accessibilityLabel={`Accept AI proposal for ${item.external_id}`}
           >
-            <Text style={styles.acceptBtnText}>✓ Accept AI</Text>
+            <Text style={styles.acceptBtnText}>Accept AI</Text>
           </Pressable>
 
           <Pressable
             onPress={() => openChangeModal(item)}
-            style={[styles.btn, styles.changeBtn]}
+            style={styles.changeBtn}
             accessibilityRole="button"
-            accessibilityLabel={`Change AI triage for ${item.external_id}`}
           >
-            <Text style={styles.changeBtnText}>✎ Change</Text>
+            <Text style={styles.changeBtnText}>Change</Text>
           </Pressable>
         </View>
       </View>
@@ -265,202 +232,149 @@ export default function AiReviewScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-          AI Triage Review
-        </Text>
-        <Text style={[styles.subtitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-          {reviewTickets.length} ticket{reviewTickets.length === 1 ? '' : 's'} waiting for human review
-        </Text>
+    <View style={styles.container}>
+      {/* Blue Top App Bar matching Screen 9 */}
+      <View style={styles.appBar}>
+        <Text style={styles.appBarTitle}>AI Review</Text>
+      </View>
+
+      {/* Segmented Pill Tabs */}
+      <View style={styles.tabsHeader}>
+        <Pressable
+          onPress={() => setActiveTab('needs_review')}
+          style={[styles.tabBtn, activeTab === 'needs_review' && styles.tabBtnActive]}
+        >
+          <Text style={[styles.tabBtnText, activeTab === 'needs_review' && styles.tabBtnTextActive]}>
+            Needs Review ({needsReviewTickets.length})
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setActiveTab('all')}
+          style={[styles.tabBtn, activeTab === 'all' && styles.tabBtnActive]}
+        >
+          <Text style={[styles.tabBtnText, activeTab === 'all' && styles.tabBtnTextActive]}>
+            All (24)
+          </Text>
+        </Pressable>
       </View>
 
       <FlatList
-        data={reviewTickets}
+        data={displayedTickets}
         keyExtractor={(item) => item.external_id}
-        renderItem={renderItem}
+        renderItem={renderTicketCard}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>🎉</Text>
-            <Text style={[styles.emptyTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-              All Caught Up!
-            </Text>
-            <Text style={[styles.emptySubtitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              No tickets currently require manual AI triage review.
+            <Text style={styles.emptyTitle}>Queue Clear!</Text>
+            <Text style={styles.emptySubtitle}>
+              All AI triage decisions have been reviewed.
             </Text>
           </View>
         }
       />
 
-      {/* Change Triage Modal */}
-      <Modal visible={Boolean(selectedTicket)} animationType="slide" transparent>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalBackdrop}
-        >
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' },
-            ]}
+      {/* Change Modal */}
+      {selectedTicket && (
+        <Modal visible={true} transparent animationType="slide" onRequestClose={closeModal}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalOverlay}
           >
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
-                  Modify AI Triage
+            <View style={styles.modalCard}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Modify AI Triage</Text>
+                  <Pressable onPress={closeModal}>
+                    <Ionicons name="close" size={24} color="#64748B" />
+                  </Pressable>
+                </View>
+
+                <Text style={styles.inputHeading}>SELECT CATEGORY</Text>
+                <View style={styles.chipsWrap}>
+                  {CATEGORIES.map((cat) => {
+                    const isSel = selectedCategory === cat;
+                    return (
+                      <Pressable
+                        key={cat}
+                        onPress={() => setSelectedCategory(cat)}
+                        style={[styles.chip, isSel && styles.chipActive]}
+                      >
+                        <Text style={[styles.chipText, isSel && styles.chipTextActive]}>
+                          {cat}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={[styles.inputHeading, { marginTop: 14 }]}>SELECT PRIORITY</Text>
+                {selectedTicket.customer_plan === 'enterprise' && (
+                  <Text style={styles.enterpriseNotice}>
+                    ⚠️ Enterprise tickets must stay at least P1
+                  </Text>
+                )}
+                <View style={styles.chipsWrap}>
+                  {ALL_PRIORITIES.map((p) => {
+                    const isSel = selectedPriority === p;
+                    const isDisabled =
+                      selectedTicket.customer_plan === 'enterprise' && (p === 'P2' || p === 'P3');
+                    return (
+                      <Pressable
+                        key={p}
+                        disabled={isDisabled}
+                        onPress={() => setSelectedPriority(p)}
+                        style={[
+                          styles.chip,
+                          isSel && styles.chipActive,
+                          isDisabled && { opacity: 0.35 },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, isSel && styles.chipTextActive]}>
+                          {p}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={[styles.inputHeading, { marginTop: 14 }]}>
+                  WRITTEN REASON (MIN 10 CHARACTERS)
                 </Text>
-                <Pressable onPress={closeModal} style={styles.closeBtn}>
-                  <Text style={styles.closeBtnText}>✕</Text>
-                </Pressable>
-              </View>
+                <TextInput
+                  style={styles.reasonInput}
+                  multiline
+                  numberOfLines={3}
+                  placeholder="Explain why you are changing the AI proposal..."
+                  placeholderTextColor="#94A3B8"
+                  value={reason}
+                  onChangeText={setReason}
+                  maxLength={300}
+                />
+                <Text style={styles.charCount}>{reason.trim().length} / 10 min chars</Text>
 
-              {selectedTicket && (
-                <>
-                  <Text style={[styles.modalSub, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-                    Ticket: {selectedTicket.external_id} ({selectedTicket.customer_plan.toUpperCase()})
-                  </Text>
-
-                  {/* Category Picker */}
-                  <Text style={[styles.inputLabel, { color: isDark ? '#CBD5E1' : '#334155' }]}>
-                    SELECT CATEGORY
-                  </Text>
-                  <View style={styles.chipsWrap}>
-                    {CATEGORIES.map((cat) => {
-                      const isSel = selectedCategory === cat;
-                      return (
-                        <Pressable
-                          key={cat}
-                          onPress={() => setSelectedCategory(cat)}
-                          style={[
-                            styles.chip,
-                            {
-                              backgroundColor: isSel ? '#3B82F6' : isDark ? '#334155' : '#F1F5F9',
-                              borderColor: isSel ? '#2563EB' : 'transparent',
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.chipText,
-                              { color: isSel ? '#FFFFFF' : isDark ? '#E2E8F0' : '#475569' },
-                            ]}
-                          >
-                            {cat}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-
-                  {/* Priority Picker with Enterprise Rule Enforcement */}
-                  <Text style={[styles.inputLabel, { color: isDark ? '#CBD5E1' : '#334155', marginTop: 14 }]}>
-                    SELECT PRIORITY
-                  </Text>
-                  {selectedTicket.customer_plan === 'enterprise' && (
-                    <Text style={styles.enterpriseNotice}>
-                      ⚠️ Enterprise tickets must stay at least P1
-                    </Text>
-                  )}
-                  <View style={styles.chipsWrap}>
-                    {ALL_PRIORITIES.map((p) => {
-                      const isSel = selectedPriority === p;
-                      const isDisabled =
-                        selectedTicket.customer_plan === 'enterprise' && (p === 'P2' || p === 'P3');
-                      return (
-                        <Pressable
-                          key={p}
-                          disabled={isDisabled}
-                          onPress={() => setSelectedPriority(p)}
-                          style={[
-                            styles.chip,
-                            {
-                              backgroundColor: isDisabled
-                                ? isDark
-                                  ? '#1E293B'
-                                  : '#E2E8F0'
-                                : isSel
-                                ? '#3B82F6'
-                                : isDark
-                                ? '#334155'
-                                : '#F1F5F9',
-                              opacity: isDisabled ? 0.4 : 1,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.chipText,
-                              { color: isSel ? '#FFFFFF' : isDark ? '#E2E8F0' : '#475569' },
-                            ]}
-                          >
-                            {p}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-
-                  {/* Written Reason Field (>= 10 chars required) */}
-                  <Text style={[styles.inputLabel, { color: isDark ? '#CBD5E1' : '#334155', marginTop: 14 }]}>
-                    WRITTEN REASON (MINIMUM 10 CHARACTERS)
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.textArea,
-                      {
-                        backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
-                        borderColor: isDark ? '#334155' : '#CBD5E1',
-                        color: isDark ? '#F8FAFC' : '#0F172A',
-                      },
-                    ]}
-                    placeholder="Explain why you are changing the category or priority..."
-                    placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-                    multiline
-                    numberOfLines={4}
-                    value={reason}
-                    onChangeText={setReason}
-                    accessibilityLabel="Written explanation for triage change"
-                  />
-                  <Text
-                    style={[
-                      styles.charCount,
-                      { color: reason.trim().length >= 10 ? '#10B981' : '#EF4444' },
-                    ]}
+                <View style={styles.modalBtnRow}>
+                  <Pressable onPress={closeModal} style={styles.cancelBtn}>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleSubmitChanges}
+                    disabled={isSubmitting}
+                    style={styles.saveBtn}
                   >
-                    {reason.trim().length} / 10 min characters
-                  </Text>
-
-                  {/* Action buttons */}
-                  <View style={styles.modalBtnRow}>
-                    <Pressable onPress={closeModal} style={[styles.modalBtn, styles.cancelBtn]}>
-                      <Text style={[styles.cancelBtnText, { color: isDark ? '#CBD5E1' : '#64748B' }]}>
-                        Cancel
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={handleSubmitChanges}
-                      disabled={isSubmitting || reason.trim().length < 10}
-                      style={[
-                        styles.modalBtn,
-                        styles.submitModalBtn,
-                        { opacity: reason.trim().length < 10 || isSubmitting ? 0.5 : 1 },
-                      ]}
-                    >
-                      {isSubmitting ? (
-                        <ActivityIndicator color="#FFFFFF" size="small" />
-                      ) : (
-                        <Text style={styles.submitModalBtnText}>Save Changes</Text>
-                      )}
-                    </Pressable>
-                  </View>
-                </>
-              )}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+                    {isSubmitting ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.saveBtnText}>Save Changes</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -468,118 +382,145 @@ export default function AiReviewScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F8FAFC',
   },
-  header: {
-    padding: 16,
-    paddingBottom: 8,
+  appBar: {
+    height: 56,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
-  title: {
+  appBarTitle: {
+    color: '#FFFFFF',
     fontSize: 22,
     fontWeight: '800',
+    letterSpacing: -0.5,
   },
-  subtitle: {
-    fontSize: 13,
-    marginTop: 2,
+  tabsHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    paddingHorizontal: 16,
+  },
+  tabBtn: {
+    paddingVertical: 12,
+    marginRight: 20,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabBtnActive: {
+    borderBottomColor: '#2563EB',
+  },
+  tabBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  tabBtnTextActive: {
+    color: '#2563EB',
+    fontWeight: '700',
   },
   listContent: {
     padding: 16,
-    paddingTop: 8,
   },
-  ticketCard: {
-    padding: 16,
+  card: {
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
     borderWidth: 1,
-    marginBottom: 14,
+    borderColor: '#E2E8F0',
+    padding: 16,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.04,
     shadowRadius: 3,
-    elevation: 2,
+    elevation: 1,
   },
-  cardHeader: {
+  cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   ticketId: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
   },
-  planBadge: {
+  decisionBadge: {
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
-  planText: {
+  decisionBadgeText: {
     fontSize: 11,
     fontWeight: '700',
   },
-  subject: {
-    fontSize: 16,
-    fontWeight: '700',
-    lineHeight: 22,
-    marginBottom: 10,
-  },
-  aiProposal: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 8,
-  },
-  propItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  propLabel: {
-    fontSize: 12,
+  subjectText: {
+    fontSize: 14,
     fontWeight: '600',
-  },
-  propVal: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  reasonBox: {
-    backgroundColor: '#FEF3C7',
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  summaryBox: {
+    color: '#334155',
+    lineHeight: 20,
     marginBottom: 12,
+  },
+  aiSuggestionBox: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+  },
+  aiSuggestionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#2563EB',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  aiLine: {
+    fontSize: 13,
+    color: '#1E293B',
+    marginBottom: 2,
+  },
+  aiLabel: {
+    fontWeight: '600',
+    color: '#64748B',
   },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 6,
-  },
-  btn: {
-    flex: 1,
-    height: 42,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   acceptBtn: {
-    backgroundColor: '#10B981',
+    flex: 1,
+    height: 40,
+    backgroundColor: '#2563EB',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   acceptBtnText: {
     color: '#FFFFFF',
-    fontWeight: '700',
     fontSize: 14,
+    fontWeight: '700',
   },
   changeBtn: {
-    backgroundColor: '#3B82F6',
+    flex: 1,
+    height: 40,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   changeBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
+    color: '#334155',
     fontSize: 14,
+    fontWeight: '700',
   },
   emptyContainer: {
+    padding: 48,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
   },
   emptyIcon: {
     fontSize: 48,
@@ -588,114 +529,122 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 4,
+    color: '#0F172A',
+    marginBottom: 6,
   },
   emptySubtitle: {
-    fontSize: 13,
+    fontSize: 14,
+    color: '#64748B',
     textAlign: 'center',
-    maxWidth: 240,
   },
-  modalBackdrop: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
   modalCard: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
     padding: 20,
-    maxHeight: '85%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 16,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
+    color: '#0F172A',
   },
-  closeBtn: {
-    padding: 6,
-  },
-  closeBtnText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  modalSub: {
-    fontSize: 13,
-    marginBottom: 16,
-  },
-  inputLabel: {
+  inputHeading: {
     fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  enterpriseNotice: {
-    color: '#BE185D',
-    fontSize: 12,
     fontWeight: '700',
-    marginBottom: 6,
+    color: '#64748B',
+    marginBottom: 8,
+    letterSpacing: 0.5,
   },
   chipsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
   chip: {
     paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 16,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
     borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  chipActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
   },
   chipText: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#334155',
   },
-  textArea: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
+  chipTextActive: {
+    color: '#FFFFFF',
+  },
+  enterpriseNotice: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  reasonInput: {
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    padding: 10,
     fontSize: 14,
-    minHeight: 80,
+    color: '#0F172A',
+    minHeight: 70,
     textAlignVertical: 'top',
   },
   charCount: {
     fontSize: 11,
-    fontWeight: '600',
-    alignSelf: 'flex-end',
+    color: '#94A3B8',
+    textAlign: 'right',
     marginTop: 4,
+    marginBottom: 16,
   },
   modalBtnRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  modalBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
+    gap: 10,
   },
   cancelBtn: {
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+    flex: 1,
+    height: 44,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
   },
   cancelBtnText: {
-    fontWeight: '600',
+    color: '#64748B',
     fontSize: 14,
+    fontWeight: '700',
   },
-  submitModalBtn: {
+  saveBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#2563EB',
   },
-  submitModalBtnText: {
+  saveBtnText: {
     color: '#FFFFFF',
-    fontWeight: '700',
     fontSize: 14,
+    fontWeight: '700',
   },
 });

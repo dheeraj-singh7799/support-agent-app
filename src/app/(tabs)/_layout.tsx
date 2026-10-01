@@ -1,6 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Text, useColorScheme } from 'react-native';
+import { useColorScheme } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppSelector } from '@/store';
 
 export default function TabsLayout() {
@@ -12,14 +13,19 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#3B82F6',
-        tabBarInactiveTintColor: isDark ? '#94A3B8' : '#64748B',
+        tabBarActiveTintColor: '#2563EB',
+        tabBarInactiveTintColor: isDark ? '#94A3B8' : '#94A3B8',
         tabBarStyle: {
           backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
-          borderTopColor: isDark ? '#334155' : '#E2E8F0',
-          height: 60,
+          borderTopColor: isDark ? '#1E293B' : '#E2E8F0',
+          borderTopWidth: 1,
+          height: 62,
           paddingBottom: 8,
           paddingTop: 8,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600',
         },
       }}
     >
@@ -27,8 +33,14 @@ export default function TabsLayout() {
         name="tickets/index"
         options={{
           title: 'Tickets',
-          tabBarLabel: 'Queue',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📋</Text>,
+          tabBarLabel: 'Tickets',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? 'ticket' : 'ticket-outline'}
+              size={22}
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
@@ -37,7 +49,13 @@ export default function TabsLayout() {
           title: 'AI Review',
           tabBarLabel: 'AI Review',
           tabBarBadge: pendingReviewCount > 0 ? pendingReviewCount : undefined,
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🤖</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? 'sparkles' : 'sparkles-outline'}
+              size={22}
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
@@ -45,7 +63,13 @@ export default function TabsLayout() {
         options={{
           title: 'Settings',
           tabBarLabel: 'Settings',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>⚙️</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? 'settings' : 'settings-outline'}
+              size={22}
+              color={color}
+            />
+          ),
         }}
       />
     </Tabs>

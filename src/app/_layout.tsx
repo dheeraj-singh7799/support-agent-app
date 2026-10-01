@@ -1,7 +1,6 @@
 import React from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useColorScheme } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Provider } from 'react-redux';
 import { store } from '@/store';
@@ -11,23 +10,21 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import { Toast } from '@/components/Toast';
 
 function AppContent() {
-  const isDark = useColorScheme() === 'dark';
-
   // Initialize network sync and urgent P0 alerts
   useNetworkSync();
   useUrgentAlerts();
 
   return (
     <SafeAreaView
-      style={{ flex: 1, backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' }}
+      style={{ flex: 1, backgroundColor: '#2563EB' }}
       edges={['top', 'left', 'right']}
     >
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <StatusBar style="light" />
       <OfflineBanner />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: isDark ? '#0B0F19' : '#F8FAFC' },
+          contentStyle: { backgroundColor: '#F8FAFC' },
           animation: 'slide_from_right',
         }}
       >

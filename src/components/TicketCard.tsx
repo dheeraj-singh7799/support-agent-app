@@ -9,6 +9,20 @@ interface TicketCardProps {
   currentAgentId?: string;
 }
 
+function getRelativeTime(dateStr: string): string {
+  try {
+    const createdMs = new Date(dateStr).getTime();
+    if (isNaN(createdMs)) return '1m';
+    const diffMin = Math.max(1, Math.floor((Date.now() - createdMs) / 60000));
+    if (diffMin < 60) return `${diffMin}m`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h`;
+    return `${Math.floor(diffHours / 24)}d`;
+  } catch {
+    return '2m';
+  }
+}
+
 export const TicketCard = memo(function TicketCard({ ticket, currentAgentId }: TicketCardProps) {
   const isDark = useColorScheme() === 'dark';
 
@@ -16,48 +30,46 @@ export const TicketCard = memo(function TicketCard({ ticket, currentAgentId }: T
     router.push(`/tickets/${ticket.external_id}` as any);
   };
 
-  // Safe fallback for empty subject (Edge case T-2006)
   const displaySubject = ticket.subject && ticket.subject.trim().length > 0
     ? ticket.subject
     : '(No Subject Provided)';
 
   const isAssignedToMe = currentAgentId && ticket.assigned_to === currentAgentId;
+  const relativeTime = getRelativeTime(ticket.created_at);
 
-  // Priority badge styling
-  const getPriorityStyle = (priority: string) => {
-    switch (priority) {
+  // Priority solid pill color matching Screen 2
+  const getPriorityBadgeColor = (p: string) => {
+    switch (p) {
       case 'P0':
-        return { bg: '#FEE2E2', text: '#DC2626', border: '#EF4444' };
+        return '#EF4444';
       case 'P1':
-        return { bg: '#FFEDD5', text: '#C2410C', border: '#F97316' };
+        return '#F97316';
       case 'P2':
-        return { bg: '#FEF9C3', text: '#A16207', border: '#EAB308' };
+        return '#F59E0B';
       case 'P3':
-        return { bg: '#F1F5F9', text: '#475569', border: '#94A3B8' };
       default:
-        // E.g., P5
-        return { bg: '#EDE9FE', text: '#6D28D9', border: '#8B5CF6' };
+        return '#10B981';
     }
   };
 
-  // Status badge styling
-  const getStatusStyle = (status: string) => {
+  const priorityColor = getPriorityBadgeColor(ticket.priority);
+
+  // Status badge style
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'open':
-        return { bg: '#E0F2FE', text: '#0369A1' };
+        return { bg: '#EFF6FF', text: '#2563EB', label: 'Open' };
       case 'in_progress':
-        return { bg: '#FEF3C7', text: '#B45309' };
+        return { bg: '#FEF3C7', text: '#D97706', label: 'In Progress' };
       case 'resolved':
-        return { bg: '#DCFCE7', text: '#15803D' };
+        return { bg: '#DCFCE7', text: '#16A34A', label: 'Resolved' };
       case 'closed':
-        return { bg: '#F3F4F6', text: '#6B7280' };
       default:
-        return { bg: '#F1F5F9', text: '#475569' };
+        return { bg: '#F1F5F9', text: '#64748B', label: 'Closed' };
     }
   };
 
-  const pStyle = getPriorityStyle(ticket.priority);
-  const sStyle = getStatusStyle(ticket.status);
+  const statusBadge = getStatusBadge(ticket.status);
 
   return (
     <Pressable
@@ -66,99 +78,76 @@ export const TicketCard = memo(function TicketCard({ ticket, currentAgentId }: T
         styles.card,
         {
           backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-          borderColor: isDark ? '#334155' : '#E2E8F0',
-          opacity: pressed ? 0.9 : 1,
-          transform: [{ scale: pressed ? 0.99 : 1 }],
+          borderColor: isDark ? '#334155' : '#F1F5F9',
+          opacity: pressed ? 0.92 : 1,
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`Ticket ${ticket.external_id}: ${displaySubject}, Priority ${ticket.priority}, Status ${ticket.status}`}
+      accessibilityLabel={`Ticket ${ticket.external_id}: ${displaySubject}`}
     >
-      <View style={styles.topRow}>
-        <View style={styles.idContainer}>
-          <Text style={[styles.ticketId, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            {ticket.external_id}
-          </Text>
-          {ticket.isOptimistic && (
-            <View style={styles.optimisticTag}>
-              <Text style={styles.optimisticText}>Syncing...</Text>
-            </View>
-          )}
-          {isAssignedToMe && (
-            <View style={styles.mineTag}>
-              <Text style={styles.mineText}>MINE</Text>
-            </View>
-          )}
+      <View style={styles.cardContent}>
+        {/* Left Solid Priority Pill */}
+        <View style={[styles.priorityPill, { backgroundColor: priorityColor }]}>
+          <Text style={styles.priorityPillText}>{ticket.priority}</Text>
         </View>
 
-        {/* Live Countdown Badge */}
-        <CountdownBadge
-          createdAt={ticket.created_at}
-          priority={ticket.priority}
-          status={ticket.status}
-        />
-      </View>
-
-      {/* Subject */}
-      <Text
-        style={[
-          styles.subject,
-          { color: isDark ? '#F8FAFC' : '#0F172A' },
-        ]}
-        numberOfLines={2}
-        ellipsizeMode="tail"
-      >
-        {displaySubject}
-      </Text>
-
-      {/* Badges footer */}
-      <View style={styles.bottomRow}>
-        <View style={styles.badgesGroup}>
-          {/* Priority Badge */}
-          <View style={[styles.badge, { backgroundColor: pStyle.bg, borderColor: pStyle.border }]}>
-            <Text style={[styles.badgeText, { color: pStyle.text }]}>{ticket.priority}</Text>
+        {/* Right Info Section */}
+        <View style={styles.infoCol}>
+          {/* Header Row: Ticket ID + Relative time */}
+          <View style={styles.topRow}>
+            <View style={styles.idWrap}>
+              <Text style={[styles.ticketId, { color: isDark ? '#F1F5F9' : '#0F172A' }]}>
+                {ticket.external_id}
+              </Text>
+              {isAssignedToMe && (
+                <View style={styles.mineTag}>
+                  <Text style={styles.mineText}>MINE</Text>
+                </View>
+              )}
+              {ticket.isOptimistic && (
+                <View style={styles.optimisticTag}>
+                  <Text style={styles.optimisticText}>Syncing...</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.timeText}>{relativeTime}</Text>
           </View>
 
-          {/* Status Badge */}
-          <View style={[styles.badge, { backgroundColor: sStyle.bg }]}>
-            <Text style={[styles.badgeText, { color: sStyle.text }]}>
-              {ticket.status.replace('_', ' ').toUpperCase()}
-            </Text>
-          </View>
-
-          {/* Customer Plan */}
-          <View
-            style={[
-              styles.badge,
-              {
-                backgroundColor:
-                  ticket.customer_plan === 'enterprise' ? '#FDF2F8' : isDark ? '#334155' : '#F1F5F9',
-              },
-            ]}
+          {/* Subject */}
+          <Text
+            style={[styles.subject, { color: isDark ? '#E2E8F0' : '#334155' }]}
+            numberOfLines={2}
+            ellipsizeMode="tail"
           >
-            <Text
-              style={[
-                styles.badgeText,
-                {
-                  color:
-                    ticket.customer_plan === 'enterprise'
-                      ? '#BE185D'
-                      : isDark
-                      ? '#CBD5E1'
-                      : '#475569',
-                },
-              ]}
-            >
-              {ticket.customer_plan.toUpperCase()}
-            </Text>
+            {displaySubject}
+          </Text>
+
+          {/* Bottom Row: Plan + Status on left, Countdown on right */}
+          <View style={styles.bottomRow}>
+            <View style={styles.tagsRow}>
+              {/* Plan Tag */}
+              <View style={styles.planTag}>
+                <Text style={styles.planTagText}>
+                  {ticket.customer_plan.toUpperCase()}
+                </Text>
+              </View>
+
+              {/* Status Tag */}
+              <View style={[styles.statusTag, { backgroundColor: statusBadge.bg }]}>
+                <Text style={[styles.statusTagText, { color: statusBadge.text }]}>
+                  {statusBadge.label}
+                </Text>
+              </View>
+            </View>
+
+            {/* Countdown timer matching priority color */}
+            <CountdownBadge
+              createdAt={ticket.created_at}
+              priority={ticket.priority}
+              status={ticket.status}
+            />
           </View>
         </View>
-
-        {ticket.assigned_to && (
-          <Text style={[styles.assigneeText, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            {ticket.assigned_to}
-          </Text>
-        )}
       </View>
     </Pressable>
   );
@@ -166,88 +155,115 @@ export const TicketCard = memo(function TicketCard({ ticket, currentAgentId }: T
 
 const styles = StyleSheet.create({
   card: {
-    padding: 14,
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
     borderWidth: 1,
     marginHorizontal: 16,
-    marginVertical: 6,
+    marginVertical: 5,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.04,
     shadowRadius: 3,
-    elevation: 2,
+    elevation: 1,
+  },
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  priorityPill: {
+    width: 32,
+    height: 24,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+    marginTop: 2,
+  },
+  priorityPillText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  infoCol: {
+    flex: 1,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
-    flexWrap: 'wrap',
-    gap: 6,
+    marginBottom: 4,
   },
-  idContainer: {
+  idWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   ticketId: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  timeText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  mineTag: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  mineText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
   },
   optimisticTag: {
     backgroundColor: '#FEF3C7',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
   },
   optimisticText: {
-    fontSize: 10,
     color: '#D97706',
-    fontWeight: '600',
-  },
-  mineTag: {
-    backgroundColor: '#3B82F6',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  mineText: {
-    fontSize: 10,
-    color: '#FFFFFF',
+    fontSize: 9,
     fontWeight: '700',
   },
   subject: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
-    lineHeight: 21,
-    marginBottom: 10,
+    lineHeight: 18,
+    marginBottom: 8,
   },
   bottomRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
   },
-  badgesGroup: {
+  tagsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    flexWrap: 'wrap',
   },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 0.5,
-    borderColor: 'transparent',
+  planTag: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
-  badgeText: {
-    fontSize: 11,
+  planTagText: {
+    fontSize: 10,
     fontWeight: '700',
+    color: '#475569',
   },
-  assigneeText: {
-    fontSize: 12,
-    fontWeight: '500',
+  statusTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  statusTagText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
 });
