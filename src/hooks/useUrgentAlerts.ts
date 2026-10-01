@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { isRunningInExpoGo } from 'expo';
 import { fakeApi } from '@/services/api/fakeApiServer';
-import { useAppDispatch } from '@/store';
+import { useAppDispatch, useAppSelector } from '@/store';
 import { ticketUpdatedFromRemote } from '@/store/slices/ticketsSlice';
 import { showToast } from '@/store/slices/offlineSlice';
 
@@ -12,7 +12,13 @@ const SEEN_P0_TICKETS_KEY = 'support_agent_seen_p0_tickets_v1';
 
 export function useUrgentAlerts() {
   const dispatch = useAppDispatch();
+  const token = useAppSelector((state) => state.auth.token);
+  const tokenRef = useRef<string | null>(token);
   const seenIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   useEffect(() => {
     let notificationsModule: any = null;
@@ -85,55 +91,58 @@ export function useUrgentAlerts() {
           console.error('Failed to save seen P0 ticket:', e);
         }
 
-        // Haptic / Sound feedback
-        try {
-          Vibration.vibrate([0, 250, 250, 250]);
-        } catch {}
-
-        // Global Alert Toast
-        dispatch(
-          showToast({
-            message: `🚨 URGENT P0 TICKET: ${ticket.external_id} (${ticket.customer_plan.toUpperCase()})`,
-            type: 'error',
-          })
-        );
-
-        // Try local system notification if module is available (in dev builds)
-        let didSendSystemNotif = false;
-        if (notificationsModule?.scheduleNotificationAsync) {
+        // Only trigger audio/modal interruption if the agent is signed in
+        if (tokenRef.current) {
+          // Haptic / Sound feedback
           try {
-            await notificationsModule.scheduleNotificationAsync({
-              content: {
-                title: `🚨 URGENT P0 TICKET: ${ticket.external_id}`,
-                body: ticket.subject || 'A new critical P0 ticket requires immediate attention.',
-                data: { ticketId: ticket.external_id },
-                sound: true,
-              },
-              trigger: null,
-            });
-            didSendSystemNotif = true;
-          } catch {
-            didSendSystemNotif = false;
-          }
-        }
+            Vibration.vibrate([0, 250, 250, 250]);
+          } catch {}
 
-        // In Expo Go or if system notification is unavailable, show actionable Alert modal:
-        // "Tapping the alert opens that ticket"
-        if (!didSendSystemNotif) {
-          Alert.alert(
-            `🚨 URGENT P0 TICKET: ${ticket.external_id}`,
-            `${ticket.subject || 'Critical incident reported.'}\n\nCustomer Plan: ${ticket.customer_plan.toUpperCase()}`,
-            [
-              { text: 'Dismiss', style: 'cancel' },
-              {
-                text: 'Open Ticket',
-                style: 'default',
-                onPress: () => {
-                  router.push(`/tickets/${ticket.external_id}` as any);
-                },
-              },
-            ]
+          // Global Alert Toast
+          dispatch(
+            showToast({
+              message: `🚨 URGENT P0 TICKET: ${ticket.external_id} (${ticket.customer_plan.toUpperCase()})`,
+              type: 'error',
+            })
           );
+
+          // Try local system notification if module is available (in dev builds)
+          let didSendSystemNotif = false;
+          if (notificationsModule?.scheduleNotificationAsync) {
+            try {
+              await notificationsModule.scheduleNotificationAsync({
+                content: {
+                  title: `🚨 URGENT P0 TICKET: ${ticket.external_id}`,
+                  body: ticket.subject || 'A new critical P0 ticket requires immediate attention.',
+                  data: { ticketId: ticket.external_id },
+                  sound: true,
+                },
+                trigger: null,
+              });
+              didSendSystemNotif = true;
+            } catch {
+              didSendSystemNotif = false;
+            }
+          }
+
+          // In Expo Go or if system notification is unavailable, show actionable Alert modal:
+          // "Tapping the alert opens that ticket"
+          if (!didSendSystemNotif) {
+            Alert.alert(
+              `🚨 URGENT P0 TICKET: ${ticket.external_id}`,
+              `${ticket.subject || 'Critical incident reported.'}\n\nCustomer Plan: ${ticket.customer_plan.toUpperCase()}`,
+              [
+                { text: 'Dismiss', style: 'cancel' },
+                {
+                  text: 'Open Ticket',
+                  style: 'default',
+                  onPress: () => {
+                    router.push(`/tickets/${ticket.external_id}` as any);
+                  },
+                },
+              ]
+            );
+          }
         }
       }
     });

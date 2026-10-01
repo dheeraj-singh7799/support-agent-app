@@ -77,6 +77,7 @@ export default function SettingsScreen() {
           text: 'Sign Out',
           style: 'destructive',
           onPress: async () => {
+            fakeApi.stopBackgroundSimulation();
             await dispatch(logoutAgent());
             router.replace('/login');
           },

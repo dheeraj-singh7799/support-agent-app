@@ -11,9 +11,6 @@ export default function IndexScreen() {
   const { isInitialized, token } = useAppSelector((state) => state.auth);
 
   useEffect(() => {
-    // Start background activity simulation
-    fakeApi.startBackgroundSimulation();
-
     // Check if an existing session is saved on device
     dispatch(checkSavedSession());
   }, [dispatch]);
@@ -21,6 +18,7 @@ export default function IndexScreen() {
   useEffect(() => {
     if (isInitialized) {
       if (token) {
+        fakeApi.startBackgroundSimulation();
         router.replace('/(tabs)/tickets' as any);
       } else {
         router.replace('/login');

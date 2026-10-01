@@ -15,6 +15,7 @@ import { router } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { loginAgent, clearAuthError } from '@/store/slices/authSlice';
 import { KNOWN_AGENTS } from '@/types/ticket';
+import { fakeApi } from '@/services/api/fakeApiServer';
 
 export default function LoginScreen() {
   const dispatch = useAppDispatch();
@@ -30,6 +31,7 @@ export default function LoginScreen() {
     dispatch(clearAuthError());
     const result = await dispatch(loginAgent({ agentId: selectedAgentId, pin }));
     if (loginAgent.fulfilled.match(result)) {
+      fakeApi.startBackgroundSimulation();
       router.replace('/(tabs)/tickets' as any);
     }
   };
